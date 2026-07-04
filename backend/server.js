@@ -7,7 +7,9 @@ const { PrismaClient } = require('@prisma/client');
 const { gerarTrilhaComIA } = require('./trilhaEngine');
 
 const app = express();
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  datasourceUrl: process.env.DATABASE_URL || 'file:./dev.db',
+});
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
