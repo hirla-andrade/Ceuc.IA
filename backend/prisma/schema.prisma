@@ -1,0 +1,56 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String                  @id @default(uuid())
+  nome         String
+  email        String                  @unique
+  senha_hash   String
+  criado_em    DateTime                @default(now())
+  profile      Profile?
+  responses    QuestionnaireResponse[]
+  careerPaths  CareerPath[]
+}
+
+model Profile {
+  id               String  @id @default(uuid())
+  userId           String  @unique
+  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idade            Int?
+  formacao         String?
+  area_interesse   String?
+}
+
+model QuestionnaireResponse {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  rede_apoio     String
+  momento        String
+  area           String
+  crescer_migrar String
+  clareza        String
+  objetivo       String
+  prazo          String
+  horas          String
+  trava          String
+  bem_estar      String
+}
+
+model CareerPath {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  resumoIA       String
+  formato        String
+  prazoEstimado  String
+  trilhaJSON     String   
+}

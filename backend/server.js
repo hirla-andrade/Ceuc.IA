@@ -1,107 +1,116 @@
-/* ============================================================
-   CEUC.IA — Backend (Node.js + Express)
-   Banco de dados: arquivo JSON local (backend/data/db.json)
-   ============================================================ */
-
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { buildTrilha } = require('./trilhaEngine');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const { PrismaClient } = require('@prisma/client');
+const { gerarTrilhaComIA } = require('./trilhaEngine');
 
 const app = express();
+const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3001;
-const DB_PATH = path.join(__dirname, 'data', 'db.json');
 
 app.use(cors());
 app.use(express.json());
 
-/* ---------------- "Banco de dados" em JSON ---------------- */
-function readDB() {
-  if (!fs.existsSync(DB_PATH)) {
-    fs.writeFileSync(DB_PATH, JSON.stringify({ users: {} }, null, 2));
+const JWT_SECRET = process.env.JWT_SECRET || 'super_secreto_ceucia_2026';
+
+/* --- MIDDLEWARE DE VALIDAÇÃO DE USUÁRIA --- */
+function verificarJWT(req, res, next) {
+  const tokenHeader = req.headers['authorization'];
+  if (!tokenHeader) return res.status(401).json({ error: 'Acesso negado. Token não fornecido.' });
+
+  const token = tokenHeader.split(' ')[1];
+  try {
+    const autenticado = jwt.verify(token, JWT_SECRET);
+    req.userId = autenticado.id;
+    next();
+  } catch (error) {
+    res.status(403).json({ error: 'Token inválido ou expirado.' });
   }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
-}
-function writeDB(db) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
 }
 
-/* ---------------- Rotas ---------------- */
+/* --- ROTAS DE AUTENTICAÇÃO --- */
+app.post('/api/auth/cadastro', async (req, res) => {
+  try {
+    const { nome, email, senha } = req.body;
 
-// Cria um usuário (login ou "continuar como convidada")
-app.post('/api/users', (req, res) => {
-  const { nome, email, convidada } = req.body;
-  const db = readDB();
-  const id = crypto.randomUUID();
-  db.users[id] = {
-    id,
-    nome: nome || null,
-    email: email || null,
-    convidada: !!convidada,
-    criadoEm: new Date().toISOString(),
-    respostas: null,
-    trilha: null
-  };
-  writeDB(db);
-  res.status(201).json({ id });
+    const usuarioExistente = await prisma.user.findUnique({ where: { email } });
+    if (usuarioExistente) return res.status(400).json({ error: 'E-mail já cadastrado.' });
+
+    const salt = await bcrypt.genSalt(10);
+    const senha_hash = await bcrypt.hash(senha, salt);
+
+    const novoUsuario = await prisma.user.create({
+      data: { nome, email, senha_hash }
+    });
+
+    res.status(201).json({ message: 'Usuária cadastrada!', userId: novoUsuario.id });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao registrar usuária.' });
+  }
 });
 
-// Busca um usuário (perfil + respostas + trilha salva)
-app.get('/api/users/:id', (req, res) => {
-  const db = readDB();
-  const user = db.users[req.params.id];
-  if (!user) return res.status(404).json({ erro: 'Usuária não encontrada' });
-  res.json(user);
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, senha } = req.body;
+
+    const usuario = await prisma.user.findUnique({ where: { email } });
+    if (!usuario) return res.status(400).json({ error: 'E-mail ou senha incorretos.' });
+
+    const senhaValida = await bcrypt.compare(senha, usuario.senha_hash);
+    if (!senhaValida) return res.status(400).json({ error: 'E-mail ou senha incorretos.' });
+
+    const token = jwt.sign({ id: usuario.id, nome: usuario.nome }, JWT_SECRET, { expiresIn: '2h' });
+    res.json({ token, user: { nome: usuario.nome, email: usuario.email } });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao processar o login.' });
+  }
 });
 
-// Salva as respostas do onboarding
-app.post('/api/users/:id/answers', (req, res) => {
-  const db = readDB();
-  const user = db.users[req.params.id];
-  if (!user) return res.status(404).json({ erro: 'Usuária não encontrada' });
-  user.respostas = req.body.respostas || {};
-  writeDB(db);
-  res.json({ ok: true });
+/* --- ROTA PROTEGIDA DA IA + BANCO DE DADOS --- */
+app.post('/api/trilha', verificarJWT, async (req, res) => {
+  try {
+    const answers = req.body;
+
+    // 1. Gera o plano usando a IA
+    const planoPersonalizado = await gerarTrilhaComIA(answers);
+
+    // 2. Salva as respostas no SQLite
+    await prisma.questionnaireResponse.create({
+      data: {
+        userId: req.userId,
+        rede_apoio: answers.rede_apoio,
+        momento: answers.momento,
+        area: answers.area,
+        crescer_migrar: answers.crescer_migrar,
+        clareza: answers.clareza,
+        objetivo: answers.objetivo,
+        prazo: answers.prazo,
+        horas: String(answers.horas),
+        trava: answers.trava,
+        bem_estar: answers.bem_estar,
+      }
+    });
+
+    // 3. Salva o resultado gerado pela IA no SQLite
+    await prisma.careerPath.create({
+      data: {
+        userId: req.userId,
+        resumoIA: planoPersonalizado.resumo,
+        formato: planoPersonalizado.formato,
+        prazoEstimado: planoPersonalizado.prazoEstimado,
+        trilhaJSON: JSON.stringify(planoPersonalizado.steps)
+      }
+    });
+
+    res.json(planoPersonalizado);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Erro ao gerar ou salvar sua trilha." });
+  }
 });
-
-// Gera a trilha a partir das respostas e salva no "banco"
-app.post('/api/users/:id/trilha', (req, res) => {
-  const db = readDB();
-  const user = db.users[req.params.id];
-  if (!user) return res.status(404).json({ erro: 'Usuária não encontrada' });
-
-  const respostas = req.body.respostas || {};
-  const trilha = buildTrilha(respostas);
-
-  user.respostas = respostas;
-  user.trilha = trilha;
-  user.trilhaGeradaEm = new Date().toISOString();
-  writeDB(db);
-
-  res.json(trilha);
-});
-
-// Recupera a última trilha salva de uma usuária
-app.get('/api/users/:id/trilha', (req, res) => {
-  const db = readDB();
-  const user = db.users[req.params.id];
-  if (!user) return res.status(404).json({ erro: 'Usuária não encontrada' });
-  if (!user.trilha) return res.status(404).json({ erro: 'Trilha ainda não gerada' });
-  res.json(user.trilha);
-});
-
-// Lista todas as usuárias (uso administrativo / demonstração)
-app.get('/api/users', (req, res) => {
-  const db = readDB();
-  res.json(Object.values(db.users));
-});
-
-/* ---------------- Serve o front-end estático (opcional) ---------------- */
-app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
 app.listen(PORT, () => {
-  console.log(`CEUC.IA backend rodando em http://localhost:${PORT}`);
-  console.log(`Front-end também servido em http://localhost:${PORT}`);
+  console.log(`Servidor CEUC.IA rodando na porta ${PORT}`);
 });
