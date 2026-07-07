@@ -48,7 +48,7 @@ async function gerarTrilhaComIA(answers) {
         { role: 'system', content: 'Você é um microsserviço que responde apenas em formato JSON estrito. Nunca adicione saudações ou markdown fora do bloco JSON.' },
         { role: 'user', content: promptParaIA }
       ],
-      model: 'llama3-8b-8192',
+      model: 'openai/gpt-oss-20b',
       temperature: 0.3,
     });
 

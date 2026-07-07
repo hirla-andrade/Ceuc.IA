@@ -1,60 +1,95 @@
-# CEUC.IA — Protótipo completo (Front-end + Back-end)
+# CEUC.IA — Trilha de carreira para mães
 
-Aplicação de trilha de carreira para mães, feita para o HackaWoman 2026.
+Aplicação que gera uma trilha de carreira personalizada para mães, cruzando
+respostas de um onboarding com um modelo de IA (Groq), feita para o HackaWoman 2026.
 
 ## Estrutura
-
-```
-ceuc-ia-projeto/
+Ceuc.IA/
 ├── frontend/
 │   ├── index.html      # telas da aplicação (splash, login, perguntas, resultado, cronograma)
-│   ├── styles.css       # identidade visual (roxo/lilás, fonte Inter)
-│   └── app.js           # lógica de onboarding, motor de trilha (fallback local) e chamadas à API
+│   ├── styles.css      # identidade visual (roxo/lilás, fonte Inter)
+│   └── app.js          # lógica de onboarding e chamadas à API
 └── backend/
-    ├── server.js         # servidor Node.js + Express (API REST)
-    ├── trilhaEngine.js    # motor de geração da trilha (mesma lógica do front-end, em Node)
-    ├── package.json
-    └── data/
-        └── db.json       # "banco de dados" em arquivo JSON
-```
+├── server.js        # servidor Node.js + Express (API REST)
+├── trilhaEngine.js   # motor de geração da trilha via IA (Groq)
+├── prisma/
+│   └── schema.prisma # modelo do banco (User, QuestionnaireResponse, CareerPath)
+├── prisma.config.ts  # configuração do Prisma 7 (datasource, migrations)
+├── package.json
+└── .env.exemplo      # modelo de variáveis de ambiente (sem valores reais)
 
-## Como rodar
+## Tecnologias
+
+- **Front-end**: HTML, CSS e JavaScript puro
+- **Back-end**: Node.js + Express
+- **Banco de dados**: PostgreSQL (via Prisma ORM 7, com adapter `@prisma/adapter-pg`)
+  - Ambiente de desenvolvimento: [Neon](https://neon.tech) (Postgres serverless gratuito)
+  - Ambiente de produção: [Magalu Cloud](https://magalu.cloud) (DBaaS PostgreSQL)
+- **IA**: [Groq](https://console.groq.com) (modelo `openai/gpt-oss-20b`)
+- **Autenticação**: JWT + bcrypt
+
+## Como rodar localmente
+
+### 1. Pré-requisitos
+- Node.js instalado
+- Uma connection string de PostgreSQL (Neon é o mais rápido para testar: [neon.tech](https://neon.tech))
+- Uma chave de API do Groq ([console.groq.com](https://console.groq.com))
+
+### 2. Configurar variáveis de ambiente
+
+Dentro de `backend/`, crie um arquivo `.env` baseado no `.env.exemplo`:
+DATABASE_URL="postgresql://usuario:senha@host/neondb?sslmode=require"
+GROQ_API_KEY="gsk_sua_chave_aqui"
+JWT_SECRET="uma_frase_secreta_qualquer"
+PORT=3001
+
+### 3. Instalar dependências e preparar o banco
 
 ```bash
 cd backend
 npm install
+npx prisma generate
+npx prisma migrate dev --name init
+```
+
+### 4. Rodar o backend
+
+```bash
 npm start
 ```
 
-O servidor sobe em `http://localhost:3001` e já serve o front-end nesse mesmo endereço
-(não precisa de outro servidor para os arquivos estáticos).
+O servidor sobe em `http://localhost:3001`.
 
-Abra `http://localhost:3001` no navegador para usar a aplicação.
+### 5. Rodar o front-end
+
+Em outro terminal:
+
+```bash
+cd frontend
+npx serve .
+```
+
+Abra o link gerado (geralmente `http://localhost:3000` ou similar) no navegador.
 
 ## API (backend)
 
-| Método | Rota                          | O que faz                                              |
-|--------|-------------------------------|---------------------------------------------------------|
-| POST   | `/api/users`                  | Cria uma usuária (nome, e-mail ou convidada)             |
-| GET    | `/api/users/:id`               | Busca perfil, respostas e trilha salva de uma usuária    |
-| POST   | `/api/users/:id/answers`       | Salva as respostas do onboarding                         |
-| POST   | `/api/users/:id/trilha`        | Gera a trilha a partir das respostas e salva no banco     |
-| GET    | `/api/users/:id/trilha`        | Recupera a última trilha gerada                          |
-| GET    | `/api/users`                   | Lista todas as usuárias (uso administrativo/demo)         |
+| Método | Rota                     | O que faz                                  |
+|--------|--------------------------|---------------------------------------------|
+| POST   | `/api/auth/cadastro`     | Cria uma nova usuária                       |
+| POST   | `/api/auth/login`        | Autentica e retorna um token JWT            |
+| POST   | `/api/trilha`            | Gera a trilha via IA e salva no banco (rota protegida por JWT) |
 
-## Banco de dados
+## Deploy em produção
 
-Por simplicidade (e por ser um protótipo de hackathon), o banco de dados é um único
-arquivo JSON (`backend/data/db.json`), lido e escrito a cada requisição. Cada usuária
-vira uma entrada no objeto `users`, com respostas e trilha salvas juntas.
+Para produção, a `DATABASE_URL` do `.env` é substituída pela connection string do
+DBaaS PostgreSQL da Magalu Cloud (a aplicação, rodando dentro da mesma rede, acessa
+o banco via IP privado). Nesse cenário, as migrations são aplicadas com:
 
-Para produção, esse arquivo seria substituído por um banco de verdade (Postgres/MySQL
-via DBaaS da Magalu Cloud, como já descrito no roteiro técnico anterior), mantendo a
-mesma lógica de `trilhaEngine.js`.
+```bash
+npx prisma migrate deploy
+```
 
-## Resiliência do front-end
+## Status do projeto
 
-O `app.js` tenta sempre falar com o backend (criar usuária, gerar e salvar a trilha).
-Se o backend estiver fora do ar, a aplicação recalcula a trilha localmente no navegador
-(a mesma lógica existe duplicada em `app.js` e `trilhaEngine.js`), então a demonstração
-nunca trava mesmo sem servidor rodando.
+Protótipo funcional de ponta a ponta: cadastro/login, onboarding, geração de trilha
+via IA e persistência em banco PostgreSQL.
